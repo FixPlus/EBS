@@ -28,7 +28,7 @@ macro CAS(success, ptr, old, new) {
         success := FALSE;
 }
 
-procedure tryPerformOnStack(info, succ)
+procedure tryPerformOnStack(info)
 variables head, top, cas_check
 {
   do_push: if(info.op = "push"){
@@ -41,11 +41,8 @@ variables head, top, cas_check
     CAS(cas_check, StackTop, top, StackTop + 1);
     if(cas_check){
       main_stack := <<info.msg>> \o main_stack;
-    };
-    set_result1:
-    if(cas_check){
       try_check := TRUE;
-    } else{
+    } else {
       try_check := FALSE;
     };
     finish_push: return
@@ -68,9 +65,6 @@ variables head, top, cas_check
     CAS(cas_check, StackTop, top, StackTop - 1);
     if(cas_check){
       main_stack := Tail(main_stack);
-    };
-    set_result2:
-    if(cas_check){
       info.msg := head;
       try_check := TRUE;
     } else{
@@ -86,7 +80,7 @@ procedure lesOp(info) {
 procedure stackOp(info)
 variables try_check
 {
-  try_main_stack: call tryPerformOnStack(info, try_check);
+  try_main_stack: call tryPerformOnStack(info);
   check_failed: if(try_check = FALSE){
     call lesOp(info);
   };
@@ -116,17 +110,17 @@ variables RcvInfo = [id |-> self, op |-> "pop", msg |-> -1], Succ = FALSE;
 
 }
 *)
-\* BEGIN TRANSLATION (chksum(pcal) = "77dbef0c" /\ chksum(tla) = "ad75ad32")
-\* Process variable Succ of process s at line 97 col 64 changed to Succ_
+\* BEGIN TRANSLATION (chksum(pcal) = "af907fa6" /\ chksum(tla) = "6df0fe1e")
+\* Process variable Succ of process s at line 91 col 64 changed to Succ_
 \* Parameter info of procedure tryPerformOnStack at line 31 col 29 changed to info_
-\* Parameter info of procedure lesOp at line 83 col 17 changed to info_l
+\* Parameter info of procedure lesOp at line 77 col 17 changed to info_l
 CONSTANT defaultInitValue
 VARIABLES main_stack, StackTop, collision, locations, MsgsToSendCounter, 
-          MsgsRecievedCounter, pc, stack, info_, succ, head, top, cas_check, 
-          info_l, info, try_check, SendInfo, Succ_, RcvInfo, Succ
+          MsgsRecievedCounter, pc, stack, info_, head, top, cas_check, info_l, 
+          info, try_check, SendInfo, Succ_, RcvInfo, Succ
 
 vars == << main_stack, StackTop, collision, locations, MsgsToSendCounter, 
-           MsgsRecievedCounter, pc, stack, info_, succ, head, top, cas_check, 
+           MsgsRecievedCounter, pc, stack, info_, head, top, cas_check, 
            info_l, info, try_check, SendInfo, Succ_, RcvInfo, Succ >>
 
 ProcSet == (Senders) \cup (Recievers)
@@ -140,7 +134,6 @@ Init == (* Global variables *)
         /\ MsgsRecievedCounter = 0
         (* Procedure tryPerformOnStack *)
         /\ info_ = [ self \in ProcSet |-> defaultInitValue]
-        /\ succ = [ self \in ProcSet |-> defaultInitValue]
         /\ head = [ self \in ProcSet |-> defaultInitValue]
         /\ top = [ self \in ProcSet |-> defaultInitValue]
         /\ cas_check = [ self \in ProcSet |-> defaultInitValue]
@@ -165,9 +158,8 @@ do_push(self) == /\ pc[self] = "do_push"
                        ELSE /\ pc' = [pc EXCEPT ![self] = "do_pop"]
                  /\ UNCHANGED << main_stack, StackTop, collision, locations, 
                                  MsgsToSendCounter, MsgsRecievedCounter, stack, 
-                                 info_, succ, head, top, cas_check, info_l, 
-                                 info, try_check, SendInfo, Succ_, RcvInfo, 
-                                 Succ >>
+                                 info_, head, top, cas_check, info_l, info, 
+                                 try_check, SendInfo, Succ_, RcvInfo, Succ >>
 
 read_head1(self) == /\ pc[self] = "read_head1"
                     /\ head' = [head EXCEPT ![self] = Head(main_stack)]
@@ -175,9 +167,8 @@ read_head1(self) == /\ pc[self] = "read_head1"
                     /\ pc' = [pc EXCEPT ![self] = "cas_once1"]
                     /\ UNCHANGED << main_stack, StackTop, collision, locations, 
                                     MsgsToSendCounter, MsgsRecievedCounter, 
-                                    stack, info_, succ, cas_check, info_l, 
-                                    info, try_check, SendInfo, Succ_, RcvInfo, 
-                                    Succ >>
+                                    stack, info_, cas_check, info_l, info, 
+                                    try_check, SendInfo, Succ_, RcvInfo, Succ >>
 
 cas_once1(self) == /\ pc[self] = "cas_once1"
                    /\ IF StackTop = top[self]
@@ -187,24 +178,14 @@ cas_once1(self) == /\ pc[self] = "cas_once1"
                               /\ UNCHANGED StackTop
                    /\ IF cas_check'[self]
                          THEN /\ main_stack' = <<info_[self].msg>> \o main_stack
-                         ELSE /\ TRUE
+                              /\ try_check' = [try_check EXCEPT ![self] = TRUE]
+                         ELSE /\ try_check' = [try_check EXCEPT ![self] = FALSE]
                               /\ UNCHANGED main_stack
-                   /\ pc' = [pc EXCEPT ![self] = "set_result1"]
+                   /\ pc' = [pc EXCEPT ![self] = "finish_push"]
                    /\ UNCHANGED << collision, locations, MsgsToSendCounter, 
-                                   MsgsRecievedCounter, stack, info_, succ, 
-                                   head, top, info_l, info, try_check, 
-                                   SendInfo, Succ_, RcvInfo, Succ >>
-
-set_result1(self) == /\ pc[self] = "set_result1"
-                     /\ IF cas_check[self]
-                           THEN /\ try_check' = [try_check EXCEPT ![self] = TRUE]
-                           ELSE /\ try_check' = [try_check EXCEPT ![self] = FALSE]
-                     /\ pc' = [pc EXCEPT ![self] = "finish_push"]
-                     /\ UNCHANGED << main_stack, StackTop, collision, 
-                                     locations, MsgsToSendCounter, 
-                                     MsgsRecievedCounter, stack, info_, succ, 
-                                     head, top, cas_check, info_l, info, 
-                                     SendInfo, Succ_, RcvInfo, Succ >>
+                                   MsgsRecievedCounter, stack, info_, head, 
+                                   top, info_l, info, SendInfo, Succ_, RcvInfo, 
+                                   Succ >>
 
 finish_push(self) == /\ pc[self] = "finish_push"
                      /\ pc' = [pc EXCEPT ![self] = Head(stack[self]).pc]
@@ -212,7 +193,6 @@ finish_push(self) == /\ pc[self] = "finish_push"
                      /\ top' = [top EXCEPT ![self] = Head(stack[self]).top]
                      /\ cas_check' = [cas_check EXCEPT ![self] = Head(stack[self]).cas_check]
                      /\ info_' = [info_ EXCEPT ![self] = Head(stack[self]).info_]
-                     /\ succ' = [succ EXCEPT ![self] = Head(stack[self]).succ]
                      /\ stack' = [stack EXCEPT ![self] = Tail(stack[self])]
                      /\ UNCHANGED << main_stack, StackTop, collision, 
                                      locations, MsgsToSendCounter, 
@@ -225,9 +205,8 @@ do_pop(self) == /\ pc[self] = "do_pop"
                       ELSE /\ pc' = [pc EXCEPT ![self] = "Error"]
                 /\ UNCHANGED << main_stack, StackTop, collision, locations, 
                                 MsgsToSendCounter, MsgsRecievedCounter, stack, 
-                                info_, succ, head, top, cas_check, info_l, 
-                                info, try_check, SendInfo, Succ_, RcvInfo, 
-                                Succ >>
+                                info_, head, top, cas_check, info_l, info, 
+                                try_check, SendInfo, Succ_, RcvInfo, Succ >>
 
 read_head2(self) == /\ pc[self] = "read_head2"
                     /\ head' = [head EXCEPT ![self] = Head(main_stack)]
@@ -235,9 +214,8 @@ read_head2(self) == /\ pc[self] = "read_head2"
                     /\ pc' = [pc EXCEPT ![self] = "check_empty"]
                     /\ UNCHANGED << main_stack, StackTop, collision, locations, 
                                     MsgsToSendCounter, MsgsRecievedCounter, 
-                                    stack, info_, succ, cas_check, info_l, 
-                                    info, try_check, SendInfo, Succ_, RcvInfo, 
-                                    Succ >>
+                                    stack, info_, cas_check, info_l, info, 
+                                    try_check, SendInfo, Succ_, RcvInfo, Succ >>
 
 check_empty(self) == /\ pc[self] = "check_empty"
                      /\ IF top[self] = 0
@@ -248,9 +226,9 @@ check_empty(self) == /\ pc[self] = "check_empty"
                                 /\ UNCHANGED << info_, try_check >>
                      /\ UNCHANGED << main_stack, StackTop, collision, 
                                      locations, MsgsToSendCounter, 
-                                     MsgsRecievedCounter, stack, succ, head, 
-                                     top, cas_check, info_l, info, SendInfo, 
-                                     Succ_, RcvInfo, Succ >>
+                                     MsgsRecievedCounter, stack, head, top, 
+                                     cas_check, info_l, info, SendInfo, Succ_, 
+                                     RcvInfo, Succ >>
 
 early_exit_ion_empty(self) == /\ pc[self] = "early_exit_ion_empty"
                               /\ pc' = [pc EXCEPT ![self] = Head(stack[self]).pc]
@@ -258,7 +236,6 @@ early_exit_ion_empty(self) == /\ pc[self] = "early_exit_ion_empty"
                               /\ top' = [top EXCEPT ![self] = Head(stack[self]).top]
                               /\ cas_check' = [cas_check EXCEPT ![self] = Head(stack[self]).cas_check]
                               /\ info_' = [info_ EXCEPT ![self] = Head(stack[self]).info_]
-                              /\ succ' = [succ EXCEPT ![self] = Head(stack[self]).succ]
                               /\ stack' = [stack EXCEPT ![self] = Tail(stack[self])]
                               /\ UNCHANGED << main_stack, StackTop, collision, 
                                               locations, MsgsToSendCounter, 
@@ -274,26 +251,16 @@ cas_once2(self) == /\ pc[self] = "cas_once2"
                               /\ UNCHANGED StackTop
                    /\ IF cas_check'[self]
                          THEN /\ main_stack' = Tail(main_stack)
-                         ELSE /\ TRUE
+                              /\ info_' = [info_ EXCEPT ![self].msg = head[self]]
+                              /\ try_check' = [try_check EXCEPT ![self] = TRUE]
+                         ELSE /\ info_' = [info_ EXCEPT ![self].msg = -1]
+                              /\ try_check' = [try_check EXCEPT ![self] = FALSE]
                               /\ UNCHANGED main_stack
-                   /\ pc' = [pc EXCEPT ![self] = "set_result2"]
+                   /\ pc' = [pc EXCEPT ![self] = "finish_pop"]
                    /\ UNCHANGED << collision, locations, MsgsToSendCounter, 
-                                   MsgsRecievedCounter, stack, info_, succ, 
-                                   head, top, info_l, info, try_check, 
-                                   SendInfo, Succ_, RcvInfo, Succ >>
-
-set_result2(self) == /\ pc[self] = "set_result2"
-                     /\ IF cas_check[self]
-                           THEN /\ info_' = [info_ EXCEPT ![self].msg = head[self]]
-                                /\ try_check' = [try_check EXCEPT ![self] = TRUE]
-                           ELSE /\ info_' = [info_ EXCEPT ![self].msg = -1]
-                                /\ try_check' = [try_check EXCEPT ![self] = FALSE]
-                     /\ pc' = [pc EXCEPT ![self] = "finish_pop"]
-                     /\ UNCHANGED << main_stack, StackTop, collision, 
-                                     locations, MsgsToSendCounter, 
-                                     MsgsRecievedCounter, stack, succ, head, 
-                                     top, cas_check, info_l, info, SendInfo, 
-                                     Succ_, RcvInfo, Succ >>
+                                   MsgsRecievedCounter, stack, head, top, 
+                                   info_l, info, SendInfo, Succ_, RcvInfo, 
+                                   Succ >>
 
 finish_pop(self) == /\ pc[self] = "finish_pop"
                     /\ pc' = [pc EXCEPT ![self] = Head(stack[self]).pc]
@@ -301,7 +268,6 @@ finish_pop(self) == /\ pc[self] = "finish_pop"
                     /\ top' = [top EXCEPT ![self] = Head(stack[self]).top]
                     /\ cas_check' = [cas_check EXCEPT ![self] = Head(stack[self]).cas_check]
                     /\ info_' = [info_ EXCEPT ![self] = Head(stack[self]).info_]
-                    /\ succ' = [succ EXCEPT ![self] = Head(stack[self]).succ]
                     /\ stack' = [stack EXCEPT ![self] = Tail(stack[self])]
                     /\ UNCHANGED << main_stack, StackTop, collision, locations, 
                                     MsgsToSendCounter, MsgsRecievedCounter, 
@@ -309,12 +275,11 @@ finish_pop(self) == /\ pc[self] = "finish_pop"
                                     RcvInfo, Succ >>
 
 tryPerformOnStack(self) == do_push(self) \/ read_head1(self)
-                              \/ cas_once1(self) \/ set_result1(self)
-                              \/ finish_push(self) \/ do_pop(self)
-                              \/ read_head2(self) \/ check_empty(self)
+                              \/ cas_once1(self) \/ finish_push(self)
+                              \/ do_pop(self) \/ read_head2(self)
+                              \/ check_empty(self)
                               \/ early_exit_ion_empty(self)
-                              \/ cas_once2(self) \/ set_result2(self)
-                              \/ finish_pop(self)
+                              \/ cas_once2(self) \/ finish_pop(self)
 
 do_nothing(self) == /\ pc[self] = "do_nothing"
                     /\ pc' = [pc EXCEPT ![self] = Head(stack[self]).pc]
@@ -322,7 +287,7 @@ do_nothing(self) == /\ pc[self] = "do_nothing"
                     /\ stack' = [stack EXCEPT ![self] = Tail(stack[self])]
                     /\ UNCHANGED << main_stack, StackTop, collision, locations, 
                                     MsgsToSendCounter, MsgsRecievedCounter, 
-                                    info_, succ, head, top, cas_check, info, 
+                                    info_, head, top, cas_check, info, 
                                     try_check, SendInfo, Succ_, RcvInfo, Succ >>
 
 lesOp(self) == do_nothing(self)
@@ -334,10 +299,8 @@ try_main_stack(self) == /\ pc[self] = "try_main_stack"
                                                                     head      |->  head[self],
                                                                     top       |->  top[self],
                                                                     cas_check |->  cas_check[self],
-                                                                    info_     |->  info_[self],
-                                                                    succ      |->  succ[self] ] >>
+                                                                    info_     |->  info_[self] ] >>
                                                                 \o stack[self]]
-                           /\ succ' = [succ EXCEPT ![self] = try_check[self]]
                         /\ head' = [head EXCEPT ![self] = defaultInitValue]
                         /\ top' = [top EXCEPT ![self] = defaultInitValue]
                         /\ cas_check' = [cas_check EXCEPT ![self] = defaultInitValue]
@@ -360,9 +323,9 @@ check_failed(self) == /\ pc[self] = "check_failed"
                                  /\ UNCHANGED << stack, info_l >>
                       /\ UNCHANGED << main_stack, StackTop, collision, 
                                       locations, MsgsToSendCounter, 
-                                      MsgsRecievedCounter, info_, succ, head, 
-                                      top, cas_check, info, try_check, 
-                                      SendInfo, Succ_, RcvInfo, Succ >>
+                                      MsgsRecievedCounter, info_, head, top, 
+                                      cas_check, info, try_check, SendInfo, 
+                                      Succ_, RcvInfo, Succ >>
 
 finish(self) == /\ pc[self] = "finish"
                 /\ pc' = [pc EXCEPT ![self] = Head(stack[self]).pc]
@@ -371,8 +334,8 @@ finish(self) == /\ pc[self] = "finish"
                 /\ stack' = [stack EXCEPT ![self] = Tail(stack[self])]
                 /\ UNCHANGED << main_stack, StackTop, collision, locations, 
                                 MsgsToSendCounter, MsgsRecievedCounter, info_, 
-                                succ, head, top, cas_check, info_l, SendInfo, 
-                                Succ_, RcvInfo, Succ >>
+                                head, top, cas_check, info_l, SendInfo, Succ_, 
+                                RcvInfo, Succ >>
 
 stackOp(self) == try_main_stack(self) \/ check_failed(self) \/ finish(self)
 
@@ -382,9 +345,9 @@ push_loop(self) == /\ pc[self] = "push_loop"
                          ELSE /\ pc' = [pc EXCEPT ![self] = "Done"]
                    /\ UNCHANGED << main_stack, StackTop, collision, locations, 
                                    MsgsToSendCounter, MsgsRecievedCounter, 
-                                   stack, info_, succ, head, top, cas_check, 
-                                   info_l, info, try_check, SendInfo, Succ_, 
-                                   RcvInfo, Succ >>
+                                   stack, info_, head, top, cas_check, info_l, 
+                                   info, try_check, SendInfo, Succ_, RcvInfo, 
+                                   Succ >>
 
 get_message(self) == /\ pc[self] = "get_message"
                      /\ SendInfo' = [SendInfo EXCEPT ![self].msg = MsgsToSendCounter]
@@ -392,8 +355,8 @@ get_message(self) == /\ pc[self] = "get_message"
                      /\ pc' = [pc EXCEPT ![self] = "perform_push"]
                      /\ UNCHANGED << main_stack, StackTop, collision, 
                                      locations, MsgsRecievedCounter, stack, 
-                                     info_, succ, head, top, cas_check, info_l, 
-                                     info, try_check, Succ_, RcvInfo, Succ >>
+                                     info_, head, top, cas_check, info_l, info, 
+                                     try_check, Succ_, RcvInfo, Succ >>
 
 perform_push(self) == /\ pc[self] = "perform_push"
                       /\ /\ info' = [info EXCEPT ![self] = SendInfo[self]]
@@ -406,8 +369,8 @@ perform_push(self) == /\ pc[self] = "perform_push"
                       /\ pc' = [pc EXCEPT ![self] = "try_main_stack"]
                       /\ UNCHANGED << main_stack, StackTop, collision, 
                                       locations, MsgsToSendCounter, 
-                                      MsgsRecievedCounter, info_, succ, head, 
-                                      top, cas_check, info_l, SendInfo, Succ_, 
+                                      MsgsRecievedCounter, info_, head, top, 
+                                      cas_check, info_l, SendInfo, Succ_, 
                                       RcvInfo, Succ >>
 
 s(self) == push_loop(self) \/ get_message(self) \/ perform_push(self)
@@ -419,9 +382,9 @@ pop_loop(self) == /\ pc[self] = "pop_loop"
                         ELSE /\ pc' = [pc EXCEPT ![self] = "Done"]
                   /\ UNCHANGED << main_stack, StackTop, collision, locations, 
                                   MsgsToSendCounter, MsgsRecievedCounter, 
-                                  stack, info_, succ, head, top, cas_check, 
-                                  info_l, info, try_check, SendInfo, Succ_, 
-                                  RcvInfo, Succ >>
+                                  stack, info_, head, top, cas_check, info_l, 
+                                  info, try_check, SendInfo, Succ_, RcvInfo, 
+                                  Succ >>
 
 perform_pop(self) == /\ pc[self] = "perform_pop"
                      /\ /\ info' = [info EXCEPT ![self] = RcvInfo[self]]
@@ -434,8 +397,8 @@ perform_pop(self) == /\ pc[self] = "perform_pop"
                      /\ pc' = [pc EXCEPT ![self] = "try_main_stack"]
                      /\ UNCHANGED << main_stack, StackTop, collision, 
                                      locations, MsgsToSendCounter, 
-                                     MsgsRecievedCounter, info_, succ, head, 
-                                     top, cas_check, info_l, SendInfo, Succ_, 
+                                     MsgsRecievedCounter, info_, head, top, 
+                                     cas_check, info_l, SendInfo, Succ_, 
                                      RcvInfo, Succ >>
 
 increment_msg_count(self) == /\ pc[self] = "increment_msg_count"
@@ -443,7 +406,7 @@ increment_msg_count(self) == /\ pc[self] = "increment_msg_count"
                              /\ pc' = [pc EXCEPT ![self] = "pop_loop"]
                              /\ UNCHANGED << main_stack, StackTop, collision, 
                                              locations, MsgsToSendCounter, 
-                                             stack, info_, succ, head, top, 
+                                             stack, info_, head, top, 
                                              cas_check, info_l, info, 
                                              try_check, SendInfo, Succ_, 
                                              RcvInfo, Succ >>
@@ -469,5 +432,5 @@ Termination == <>(\A self \in ProcSet: pc[self] = "Done")
 
 =============================================================================
 \* Modification History
-\* Last modified Sun May 14 05:34:05 MSK 2023 by Ѕушев ƒмитрий
+\* Last modified Sun May 14 05:57:15 MSK 2023 by Ѕушев ƒмитрий
 \* Created Sun May 14 00:33:34 MSK 2023 by Ѕушев ƒмитрий
