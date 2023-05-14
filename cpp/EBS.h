@@ -74,6 +74,8 @@ public:
     p.cell->data = data;
     StackOp(&p);
   }
+
+  // Pop operation can fail if stack is empty.
   std::optional<int> pop(unsigned tid) {
     if (tid >= location.size())
       throw std::out_of_range("Unexpected TID");
