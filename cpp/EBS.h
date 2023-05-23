@@ -2,7 +2,10 @@
 #include <atomic>
 #include <cstdlib>
 #include <optional>
-
+#include <ostream>
+#include <vector>
+#include <cassert>
+#include <chrono>
 /*
  *
  * Realization of Elimination backoff stack algorithm.
@@ -32,6 +35,18 @@ struct Cell {
   int data;
 };
 
+struct DebugEvent{
+  unsigned tid;
+  enum class Type{
+    PUSH,
+    POP
+  } type;
+  int data;
+};
+
+// ColArSize - size of collision array.
+// MaxThreads - upper bound for expected tid to come.
+// operations throw exception if bound is violated.
 template <unsigned ColArSize, unsigned MaxThreads> class Stack {
 private:
   struct TData {
@@ -40,7 +55,32 @@ private:
     Cell *cell;
   };
 
+  using clock = std::chrono::high_resolution_clock;
+  using time_point = std::chrono::time_point<clock>;
 public:
+
+  
+  // Returns event log.
+  // It is sorted chronologically.
+  // Call it only no push/pop operations are in progress,
+  // access to per-thread event logs are not synchronized.
+  auto getLog() const{
+    // Merge logs from all threads.
+    std::vector<std::pair<DebugEvent, time_point>> merged;
+    for(auto& threadLog: m_events)
+      std::transform(threadLog.begin(), threadLog.end(), std::back_inserter(merged), [](auto& event){ return event; });
+
+    // sort merged log chronologically.
+    std::sort(merged.begin(), merged.end(), [](auto& event1, auto& event2){ return event1.second < event2.second;});
+
+    // strip time point information.
+    std::vector<DebugEvent> events;
+
+    std::transform(merged.begin(), merged.end(), std::back_inserter(events), [](auto& event){ return event.first; });
+
+    return events;
+  }
+
   Stack() {
     for (auto &loc : location)
       loc.store(TaggedStruct<TData *>(nullptr, 0u));
@@ -48,6 +88,10 @@ public:
       col.store(TaggedStruct<int>(-1, 0u));
 
     m_Head.store(TaggedStruct<Cell *>(nullptr, 0u));
+
+    // pre-allocate per-thread event storage space.
+    for(auto& threadLog: m_events)
+       threadLog.reserve(10);
   }
 
   Stack(Stack const &another) = delete;
@@ -72,6 +116,9 @@ public:
     p.op = TData::PUSH;
     p.cell = new Cell{};
     p.cell->data = data;
+    // log 'push' before taking action to garantuee it will shows earlier
+    // in event log than corresponding 'pop' event.
+    m_events.at(tid).emplace_back(std::make_pair(DebugEvent{tid, DebugEvent::Type::PUSH, data}, clock::now()));
     StackOp(&p);
   }
 
@@ -87,9 +134,11 @@ public:
 
     if (!p.cell)
       return {};
-    int ret = p.cell->data;
+    auto data = p.cell->data;
+    // log 'pop' after taking succsessful action.
+    m_events.at(tid).emplace_back(std::make_pair(DebugEvent{tid, DebugEvent::Type::POP, data}, clock::now()));
     delete p.cell;
-    return ret;
+    return data;
   }
 
 private:
@@ -113,8 +162,9 @@ private:
       if (him.val != -1) {
         auto q = location.at(him.val).load();
         if (q.val != nullptr && q.val->tid == him.val && q.val->op != p->op) {
+	  auto ptagcopy = ptagged;
           if (location.at(p->tid).compare_exchange_strong(
-                  ptagged, TaggedStruct<TData *>(nullptr, ptagged.tag + 1))) {
+                  ptagcopy, TaggedStruct<TData *>(nullptr, ptagged.tag + 1))) {
             if (TryCollision(p, q, him.val)) {
               return;
             } else {
@@ -192,6 +242,24 @@ private:
   TaggedAtomic<Cell *> m_Head;
   std::array<TaggedAtomic<int>, ColArSize> collision;
   std::array<TaggedAtomic<TData *>, MaxThreads> location;
+
+  // per-thread event log storage.
+  std::array<std::vector<std::pair<DebugEvent, time_point>>, MaxThreads> m_events;
 };
+
+// prints DebugEvent:
+// [<tid:unsigned>] - <type:PUSH|POP>(<data:int>)
+std::ostream& operator<<(std::ostream& stream, DebugEvent const&event) {
+  stream << "[" << event.tid << "] - ";
+  std::string typeStr;
+  switch(event.type){
+    case DebugEvent::Type::PUSH: typeStr = "PUSH"; break;
+    case DebugEvent::Type::POP: typeStr = "POP"; break;
+    default:
+      assert(0 && "Unreachable");
+  }
+  stream << typeStr << "(" << event.data << ")";
+  return stream;
+}
 
 } // namespace ebs
