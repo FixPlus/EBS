@@ -1,11 +1,13 @@
+#include <algorithm>
 #include <array>
 #include <atomic>
+#include <cassert>
+#include <chrono>
 #include <cstdlib>
+#include <memory>
 #include <optional>
 #include <ostream>
 #include <vector>
-#include <cassert>
-#include <chrono>
 /*
  *
  * Realization of Elimination backoff stack algorithm.
@@ -55,6 +57,17 @@ private:
     Cell *cell;
   };
 
+  // Every TData structure happens to have
+  // a lifetime not bounded by signle thread
+  // operation.
+  // E.G. if thread i and thread j encountered
+  // successful collision (i did push and j did pop),
+  // i shares it's data with j. Thread i might exit
+  // earlier than j read that data, that's why j is
+  // accountable for disposing it. Another way j might
+  // read data and exit before i, and i will need to
+  // delete it. that's why algo uses shared_ptr here.
+  using PTData = std::shared_ptr<TData>;
   using clock = std::chrono::high_resolution_clock;
   using time_point = std::chrono::time_point<clock>;
 public:
@@ -83,7 +96,7 @@ public:
 
   Stack() {
     for (auto &loc : location)
-      loc.store(TaggedStruct<TData *>(nullptr, 0u));
+      loc.store(nullptr);
     for (auto &col : collision)
       col.store(TaggedStruct<int>(-1, 0u));
 
@@ -111,8 +124,7 @@ public:
   void push(unsigned tid, int data) {
     if (tid >= location.size())
       throw std::out_of_range("Unexpected TID");
-    // TODO: for now it causes memory leak
-    auto *p = new TData;
+    auto p = std::make_shared<TData>();
     p->tid = tid;
     p->op = TData::PUSH;
     p->cell = new Cell{};
@@ -127,8 +139,7 @@ public:
   std::optional<int> pop(unsigned tid) {
     if (tid >= location.size())
       throw std::out_of_range("Unexpected TID");
-    // TODO: for now it causes memory leak
-    auto *p = new TData;
+    auto p = std::make_shared<TData>();
     p->tid = tid;
     p->op = TData::POP;
 
@@ -144,18 +155,17 @@ public:
   }
 
 private:
-  void StackOp(TData *p) {
+  void StackOp(PTData &p) {
     if (!TryPerformStackOp(p))
       LesOp(p);
     return;
   }
 
   auto GetPosition() { return rand() % collision.size(); }
-  void LesOp(TData *p) {
+  void LesOp(PTData &p) {
     while (true) {
-      auto ptagged =
-          TaggedStruct<decltype(p)>(p, location.at(p->tid).load().tag + 10);
-      location.at(p->tid).store(ptagged);
+      auto pcopy = p;
+      location.at(p->tid).store(p);
       auto pos = GetPosition();
       auto him = collision.at(pos).load();
       while (!collision.at(pos).compare_exchange_strong(
@@ -163,10 +173,8 @@ private:
         ;
       if (him.val != -1) {
         auto q = location.at(him.val).load();
-        if (q.val != nullptr && q.val->tid == him.val && q.val->op != p->op) {
-	  auto ptagcopy = ptagged;
-          if (location.at(p->tid).compare_exchange_strong(
-                  ptagcopy, TaggedStruct<TData *>(nullptr, ptagged.tag + 1))) {
+        if (q != nullptr && q->tid == him.val && q->op != p->op) {
+          if (location.at(p->tid).compare_exchange_strong(pcopy, nullptr)) {
             if (TryCollision(p, q, him.val)) {
               return;
             } else {
@@ -179,8 +187,8 @@ private:
         }
       }
       /* delay */
-      if (!location.at(p->tid).compare_exchange_strong(
-              ptagged, TaggedStruct<TData *>(nullptr, ptagged.tag + 1))) {
+      pcopy = p;
+      if (!location.at(p->tid).compare_exchange_strong(pcopy, nullptr)) {
         FinishCollision(p);
         return;
       }
@@ -190,7 +198,7 @@ private:
     }
   }
 
-  bool TryPerformStackOp(TData *p) {
+  bool TryPerformStackOp(PTData &p) {
     TaggedStruct<Cell *> phead, pnext;
 
     if (p->op == TData::PUSH) {
@@ -216,22 +224,19 @@ private:
     }
   }
 
-  void FinishCollision(TData *p) {
+  void FinishCollision(PTData &p) {
     if (p->op == TData::POP) {
-      p->cell = location.at(p->tid).load().val->cell;
-      location.at(p->tid).store(
-          TaggedStruct<TData *>(nullptr, location.at(p->tid).load().tag + 10));
+      p->cell = location.at(p->tid).load()->cell;
+      location.at(p->tid).store(nullptr);
     }
   }
 
-  bool TryCollision(TData *p, TaggedStruct<TData *> q, unsigned him) {
+  bool TryCollision(PTData &p, PTData q, unsigned him) {
     if (p->op == TData::PUSH) {
-      return location.at(him).compare_exchange_strong(
-          q, TaggedStruct<decltype(p)>(p, q.tag + 1));
+      return location.at(him).compare_exchange_strong(q, p);
     } else if (p->op == TData::POP) {
-      if (location.at(him).compare_exchange_strong(
-              q, TaggedStruct<decltype(p)>(nullptr, q.tag + 1))) {
-        p->cell = q.val->cell;
+      if (location.at(him).compare_exchange_strong(q, nullptr)) {
+        p->cell = q->cell;
         return true;
       } else {
         return false;
@@ -241,7 +246,9 @@ private:
 
   TaggedAtomic<Cell *> m_Head;
   std::array<TaggedAtomic<int>, ColArSize> collision;
-  std::array<TaggedAtomic<TData *>, MaxThreads> location;
+  // I assume that atomic shared_ptr should not fall to the ABA problem.
+  // There is no way to tag it anyway...
+  std::array<std::atomic<std::shared_ptr<TData>>, MaxThreads> location;
 
   // per-thread event log storage.
   std::array<std::vector<std::pair<DebugEvent, time_point>>, MaxThreads> m_events;
