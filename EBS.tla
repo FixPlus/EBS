@@ -199,6 +199,7 @@ variable RcvInfo = [id |-> <<self>>, op |-> "pop", msg |-> -1];
      \* Increment only if popped successfully
      increment_rcv: if(RcvInfo.msg /= -1){
        MsgsRecievedCounter := MsgsRecievedCounter + 1;
+       assert(~(RcvInfo.msg \in RcvdMsgs));
        RcvdMsgs := RcvdMsgs \union {RcvInfo.msg};
      }
   }
@@ -206,7 +207,7 @@ variable RcvInfo = [id |-> <<self>>, op |-> "pop", msg |-> -1];
 
 }
 *)
-\* BEGIN TRANSLATION (chksum(pcal) = "8c5f0b53" /\ chksum(tla) = "8b9fbff1")
+\* BEGIN TRANSLATION (chksum(pcal) = "b065c69e" /\ chksum(tla) = "85931afb")
 CONSTANT defaultInitValue
 VARIABLES main_stack, StackTop, collision, locations, MsgsToSendCounter, 
           MsgsRecievedCounter, RcvdMsgs, pc, stack
@@ -830,6 +831,8 @@ perform_pop(self) == /\ pc[self] = "perform_pop"
 increment_rcv(self) == /\ pc[self] = "increment_rcv"
                        /\ IF RcvInfo[self].msg /= -1
                              THEN /\ MsgsRecievedCounter' = MsgsRecievedCounter + 1
+                                  /\ Assert((~(RcvInfo[self].msg \in RcvdMsgs)), 
+                                            "Failure of assertion at line 202, column 8.")
                                   /\ RcvdMsgs' = (RcvdMsgs \union {RcvInfo[self].msg})
                              ELSE /\ TRUE
                                   /\ UNCHANGED << MsgsRecievedCounter, 
@@ -862,6 +865,6 @@ Termination == <>(\A self \in ProcSet: pc[self] = "Done")
 
 =============================================================================
 \* Modification History
-\* Last modified Sun May 14 23:20:40 MSK 2023 by dybv-sc
+\* Last modified Wed May 24 13:11:54 MSK 2023 by dybv-sc
 \* Last modified Sun May 14 05:57:15 MSK 2023 by ����� �������
 \* Created Sun May 14 00:33:34 MSK 2023 by ����� �������

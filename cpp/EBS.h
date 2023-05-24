@@ -111,33 +111,35 @@ public:
   void push(unsigned tid, int data) {
     if (tid >= location.size())
       throw std::out_of_range("Unexpected TID");
-    TData p;
-    p.tid = tid;
-    p.op = TData::PUSH;
-    p.cell = new Cell{};
-    p.cell->data = data;
+    // TODO: for now it causes memory leak
+    auto *p = new TData;
+    p->tid = tid;
+    p->op = TData::PUSH;
+    p->cell = new Cell{};
+    p->cell->data = data;
     // log 'push' before taking action to garantuee it will shows earlier
     // in event log than corresponding 'pop' event.
     m_events.at(tid).emplace_back(std::make_pair(DebugEvent{tid, DebugEvent::Type::PUSH, data}, clock::now()));
-    StackOp(&p);
+    StackOp(p);
   }
 
   // Pop operation can fail if stack is empty.
   std::optional<int> pop(unsigned tid) {
     if (tid >= location.size())
       throw std::out_of_range("Unexpected TID");
-    TData p;
-    p.tid = tid;
-    p.op = TData::POP;
+    // TODO: for now it causes memory leak
+    auto *p = new TData;
+    p->tid = tid;
+    p->op = TData::POP;
 
-    StackOp(&p);
+    StackOp(p);
 
-    if (!p.cell)
+    if (!p->cell)
       return {};
-    auto data = p.cell->data;
+    auto data = p->cell->data;
     // log 'pop' after taking succsessful action.
     m_events.at(tid).emplace_back(std::make_pair(DebugEvent{tid, DebugEvent::Type::POP, data}, clock::now()));
-    delete p.cell;
+    delete p->cell;
     return data;
   }
 
@@ -230,8 +232,6 @@ private:
       if (location.at(him).compare_exchange_strong(
               q, TaggedStruct<decltype(p)>(nullptr, q.tag + 1))) {
         p->cell = q.val->cell;
-        location.at(p->tid).store(TaggedStruct<TData *>(
-            nullptr, location.at(p->tid).load().tag + 10));
         return true;
       } else {
         return false;
