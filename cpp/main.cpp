@@ -36,6 +36,47 @@ bool check_results(std::vector<int> res) {
   return true;
 }
 
+// Event log must satisfy following sanity checks:
+//
+// 1. for each PUSH(I) event there must be single POP(I)
+// event that happens later.
+// 2. there should be no POP events that do not fall under 1.
+// condition.
+bool sanitize_events(const StackT &stack) {
+  auto log = stack.getLog();
+  auto totalCorrectPops = 0u;
+  auto isPush = [](const ebs::DebugEvent &e) {
+    return e.type == ebs::DebugEvent::Type::PUSH;
+  };
+  for (auto it = std::find_if(log.begin(), log.end(), isPush); it != log.end();
+       it = std::find_if(std::next(it), log.end(), isPush)) {
+    auto pops = std::count_if(std::next(it), log.end(), [&it](auto &event) {
+      return event.type == ebs::DebugEvent::Type::POP && event.data == it->data;
+    });
+    if (pops != 1) {
+      std::cerr << "Following push event:" << std::endl << *it << std::endl;
+      if (pops == 0)
+        std::cerr << "Has no corresponding pop event" << std::endl;
+      else
+        std::cerr << "Has multiple(" << pops << ") corresponding pop events"
+                  << std::endl;
+      return false;
+    }
+    totalCorrectPops += 1;
+  }
+
+  auto totalPops = std::count_if(log.begin(), log.end(), [](auto &event) {
+    return event.type == ebs::DebugEvent::Type::POP;
+  });
+  if (totalPops != totalCorrectPops) {
+    std::cerr << "Number of total 'pop' operations(" << totalPops
+              << ") is greater than number of correct pop operations("
+              << totalCorrectPops << ")" << std::endl;
+    return false;
+  }
+  return true;
+}
+
 /*
  * Test suit
  *
@@ -99,7 +140,7 @@ int main(int argc, char** argv) {
   for(auto& event : log)
     std::cout << event << std::endl;
 
-  if (check_results(results))
+  if (check_results(results) && sanitize_events(stack))
     return 0;
   else
     return 1;
